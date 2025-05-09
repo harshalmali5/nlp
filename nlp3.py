@@ -1,98 +1,81 @@
-# news_classification_pipeline.py
-
-import pandas as pd
-import re
-import nltk
-import pickle
+import gym
 import numpy as np
-from nltk.corpus import stopwords, wordnet
-from nltk.stem import WordNetLemmatizer
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.model_selection import train_test_split
-from sklearn.feature_selection import chi2
+from collections import defaultdict
 
-# --- Download NLTK Resources ---
-nltk.download('punkt')
-nltk.download('wordnet')
-nltk.download('omw-1.4')
-nltk.download('stopwords')
-nltk.download('averaged_perceptron_tagger')
+env = gym.make("FrozenLake-v1", is_slippery=False)  # Deterministic version
 
-# --- Load Dataset ---
-with open('./Data/News_dataset.pickle', 'rb') as f:
-    df = pd.read_pickle(f)
+# Define a random policy
+policy = defaultdict(lambda: env.action_space.sample())
 
-# --- Basic Cleaning ---
-df['Content_Parsed_1'] = df['Content'].str.replace("\r", " ").str.replace("\n", " ").str.replace("    ", " ").str.replace('"', '')
-df['Content_Parsed_2'] = df['Content_Parsed_1'].str.lower()
+# Initialize value function
+V = defaultdict(float)
+returns = defaultdict(list)
+num_episodes = 10000
+gamma = 0.9
 
-# --- Remove Punctuation ---
-punctuation_signs = list("?:!.,;")
-df['Content_Parsed_3'] = df['Content_Parsed_2']
-for punct_sign in punctuation_signs:
-    df['Content_Parsed_3'] = df['Content_Parsed_3'].str.replace(punct_sign, '', regex=True)
+for _ in range(num_episodes):
+    state = env.reset()
+    episode = []
+    done = False
 
-df['Content_Parsed_4'] = df['Content_Parsed_3'].str.replace("'s", "", regex=True)
+    while not done:
+        action = policy[state]
+        next_state, reward, done, _ = env.step(action)
+        episode.append((state, reward))
+        state = next_state
 
-# --- Lemmatization ---
-lemmatizer = WordNetLemmatizer()
-lemmatized_texts = []
-for text in df['Content_Parsed_4']:
-    tokens = text.split(" ")
-    lemmatized = [lemmatizer.lemmatize(word, pos='v') for word in tokens]
-    lemmatized_texts.append(" ".join(lemmatized))
+    G = 0
+    visited_states = set()
+    for state, reward in reversed(episode):
+        G = gamma * G + reward
+        if state not in visited_states:
+            returns[state].append(G)
+            V[state] = np.mean(returns[state])
+            visited_states.add(state)
 
-df['Content_Parsed_5'] = lemmatized_texts
+# Display estimated value function
+print("Estimated Value Function:")
+for s in range(env.observation_space.n):
+    print(f"V({s}) = {V[s]:.2f}")
+    
+    
+import gym
+import numpy as np
+from collections import defaultdict
 
-# --- Stopword Removal ---
-stop_words = set(stopwords.words('english'))
-def remove_stopwords(text):
-    return " ".join([word for word in text.split() if word not in stop_words])
+env = gym.make("FrozenLake-v1", is_slippery=False)
 
-df['Content_Parsed_6'] = df['Content_Parsed_5'].apply(remove_stopwords)
+alpha = 0.1      # Learning rate
+gamma = 0.99     # Discount factor
+epsilon = 0.1    # Exploration rate
+num_episodes = 5000
 
-# --- Column Selection ---
-df = df[["File_Name", "Category", "Complete_Filename", "Content", "Content_Parsed_6"]]
-df = df.rename(columns={'Content_Parsed_6': 'Content_Parsed'})
+Q = defaultdict(lambda: np.zeros(env.action_space.n))
 
-# --- Label Encoding ---
-category_codes = {'business': 0, 'entertainment': 1, 'politics': 2, 'sport': 3, 'tech': 4}
-df['Category_Code'] = df['Category'].map(category_codes)
+def epsilon_greedy_policy(state, Q, epsilon):
+    if np.random.rand() < epsilon:
+        return env.action_space.sample()
+    return np.argmax(Q[state])
 
-# --- Train-Test Split ---
-X_train, X_test, y_train, y_test = train_test_split(
-    df['Content_Parsed'], df['Category_Code'], test_size=0.15, random_state=8
-)
+for _ in range(num_episodes):
+    state = env.reset()
+    action = epsilon_greedy_policy(state, Q, epsilon)
+    done = False
 
-# --- TF-IDF Vectorization ---
-tfidf = TfidfVectorizer(
-    encoding='utf-8',
-    ngram_range=(1, 2),
-    stop_words=None,
-    lowercase=False,
-    max_df=1.0,
-    min_df=10,
-    max_features=300,
-    norm='l2',
-    sublinear_tf=True
-)
+    while not done:
+        next_state, reward, done, _ = env.step(action)
+        next_action = epsilon_greedy_policy(next_state, Q, epsilon)
+        
+        td_target = reward + gamma * Q[next_state][next_action]
+        td_error = td_target - Q[state][action]
+        Q[state][action] += alpha * td_error
 
-features_train = tfidf.fit_transform(X_train).toarray()
-features_test = tfidf.transform(X_test).toarray()
+        state = next_state
+        action = next_action
 
-# --- Chi-Square Feature Selection ---
-for label, category_id in category_codes.items():
-    chi2score = chi2(features_train, y_train == category_id)
-    indices = np.argsort(chi2score[0])
-    feature_names = np.array(tfidf.get_feature_names_out())[indices]
-    unigrams = [term for term in feature_names if len(term.split(' ')) == 1]
-    bigrams = [term for term in feature_names if len(term.split(' ')) == 2]
-
-    print(f"# '{label}' category:")
-    print("  . Most correlated unigrams:\n. " + "\n. ".join(unigrams[-5:]))
-    print("  . Most correlated bigrams:\n. " + "\n. ".join(bigrams[-2:]))
-    print("")
-
-# Optional: Save processed data or vectorizer
-# with open("tfidf_vectorizer.pkl", "wb") as f:
-#     pickle.dump(tfidf, f)
+# Display learned Q-values
+print("Learned Q-values using SARSA:")
+for s in range(env.observation_space.n):
+    print(f"State {s}: {Q[s]}")
+    
+    
