@@ -1,80 +1,71 @@
-# nlp_preprocessing.py
-
-import pandas as pd
 import numpy as np
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from gensim.models import Word2Vec
+import random
 
-# Ensure necessary NLTK data is downloaded
-# nltk.download('punkt')
-# nltk.download('stopwords')
+# Define a simple k-armed bandit problem
+k = 5
+true_action_values = np.random.normal(0, 1, k)  # True reward for each arm
 
-# Load dataset
-data = pd.read_csv('../Data/assignment2.csv')
+# Hyperparameters
+epsilon = 0.1
+steps = 1000
 
-# Display initial info (optional)
-# print(data.head())
-# print(data.describe(include='all'))
+# Initialize estimates and counts
+action_values = np.zeros(k)
+action_counts = np.zeros(k)
 
-# Drop rows with missing values and reset the index
-data.dropna(inplace=True)
-data.reset_index(drop=True, inplace=True)
+rewards = []
 
-# Check for any null values after cleanup (optional)
-# print(data.isnull().sum())
+for step in range(steps):
+    # Exploration vs. Exploitation
+    if random.random() < epsilon:
+        action = np.random.randint(k)  # Explore
+    else:
+        action = np.argmax(action_values)  # Exploit
 
-# Preprocessing function to tokenize text, lowercase it, remove stopwords and non-alphabetic tokens
-stop_words = set(stopwords.words('english'))
-def preprocess(text):
-    tokens = word_tokenize(text.lower())
-    tokens = [token for token in tokens if token.isalpha() and token not in stop_words]
-    return tokens
+    # Simulate reward (true mean + noise)
+    reward = np.random.binomial(n=1, p=1 / (1 + np.exp(-true_action_values[action])))
+    rewards.append(reward)
 
-# Apply preprocessing to the 'Market Category' column
-data['Market Category'] = data['Market Category'].apply(preprocess)
+    # Update counts and estimated value
+    action_counts[action] += 1
+    action_values[action] += (reward - action_values[action]) / action_counts[action]
 
-# ----------------- Bag-of-Words -----------------
-count_vectorizer = CountVectorizer(tokenizer=lambda doc: doc, lowercase=False)
-bow = count_vectorizer.fit_transform(data['Market Category'])
+print("Estimated Action Values:", action_values)
+print("True Action Values:", true_action_values)
+print("Total Reward:", sum(rewards))
 
-# Print first 5 rows and 10 columns of BoW matrix
-print("Bag-of-Words Sample:")
-print(bow.toarray()[:5, :10])
 
-# ----------------- Normalized Count Occurrence -----------------
-normalized_count = bow.copy()
-for i, j in zip(*normalized_count.nonzero()):
-    doc_length = len(data['Market Category'][i])
-    if doc_length > 0:
-        normalized_count[i, j] = normalized_count[i, j] / doc_length
+import numpy as np
+import math
 
-print("\nNormalized Count Occurrence Sample:")
-print(normalized_count.toarray()[:5, :10])
+k = 5
+true_action_probs = np.random.uniform(0.1, 0.9, k)  # Prob of reward for each arm
 
-# ----------------- TF-IDF -----------------
-tfidf_vectorizer = TfidfVectorizer(tokenizer=lambda doc: doc, lowercase=False)
-tfidf = tfidf_vectorizer.fit_transform(data['Market Category'])
+steps = 1000
+action_values = np.zeros(k)
+action_counts = np.zeros(k)
 
-print("\nTF-IDF Sample:")
-print(tfidf.toarray()[:5, :10])
+rewards = []
 
-# ----------------- Word2Vec Embedding -----------------
-# Train Word2Vec model on tokenized data
-model = Word2Vec(sentences=data['Market Category'], vector_size=100, window=5, min_count=1, workers=4)
+for t in range(1, steps + 1):
+    ucb_values = np.zeros(k)
+    for i in range(k):
+        if action_counts[i] == 0:
+            ucb_values[i] = float('inf')  # Ensure every action is taken at least once
+        else:
+            bonus = math.sqrt((2 * math.log(t)) / action_counts[i])
+            ucb_values[i] = action_values[i] + bonus
 
-# Initialize empty embedding matrix
-embeddings = np.zeros((len(data), 100))
+    action = np.argmax(ucb_values)
 
-# Average word vectors for each document
-for i, tokens in enumerate(data['Market Category']):
-    if tokens:  # Avoid division by zero
-        for token in tokens:
-            embeddings[i] += model.wv[token]
-        embeddings[i] /= len(tokens)
+    reward = np.random.binomial(1, true_action_probs[action])
+    rewards.append(reward)
 
-print("\nWord2Vec Embeddings Sample:")
-print(embeddings[:5])
+    action_counts[action] += 1
+    action_values[action] += (reward - action_values[action]) / action_counts[action]
+
+print("Estimated Action Values:", action_values)
+print("True Action Probabilities:", true_action_probs)
+print("Total Reward:", sum(rewards))
+
 
